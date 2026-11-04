@@ -1,0 +1,6 @@
+import { env } from 'cloudflare:workers';
+const create = `CREATE TABLE IF NOT EXISTS family_profiles (user_id TEXT PRIMARY KEY, data_json TEXT NOT NULL, updated_at TEXT NOT NULL)`;
+function userId(request: Request) { return request.headers.get('oai-authenticated-user-id'); }
+async function ready() { await env.DB.prepare(create).run(); }
+export async function GET(request: Request) { const id=userId(request); if(!id) return Response.json({error:'Sign in required'},{status:401}); await ready(); const row=await env.DB.prepare('SELECT data_json FROM family_profiles WHERE user_id = ?').bind(id).first<{data_json:string}>(); return Response.json(row?{data:JSON.parse(row.data_json)}:{}); }
+export async function POST(request: Request) { const id=userId(request); if(!id) return Response.json({error:'Sign in required'},{status:401}); const data=await request.json(); const json=JSON.stringify(data); if(json.length>100000) return Response.json({error:'Profile too large'},{status:413}); await ready(); await env.DB.prepare(`INSERT INTO family_profiles (user_id,data_json,updated_at) VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET data_json=excluded.data_json,updated_at=excluded.updated_at`).bind(id,json,new Date().toISOString()).run(); return Response.json({ok:true}); }
